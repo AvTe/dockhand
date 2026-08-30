@@ -21,7 +21,7 @@ A merchant installs the Shopify app, which stores a row in `shops`. They then co
 | `rules` | The merchant's routing rules: which event, which condition, which list/board to create a task in |
 | `sync_events` | Idempotency + audit log, keyed on `(shop_id, shopify_webhook_id)` |
 
-The SQL is also checked into `supabase/migrations/0001_init_schema.sql` so schema history lives in git.
+The SQL is also checked into `supabase/migrations/` so schema history lives in git. See CLAUDE.md ("Database migrations") for how to actually apply changes to the live project.
 
 ## Setup checklist — what I need from you
 
@@ -38,13 +38,20 @@ cp .env.example .env.local
 ### 2. Get the Supabase service role key
 The project already exists. Go to [supabase.com/dashboard](https://supabase.com/dashboard) → project `dockhand` → **Project Settings → API** → copy the **service_role** key (NOT the anon key, that's already filled into `.env.example`) into `.env.local` as `SUPABASE_SERVICE_ROLE_KEY`. Never commit this key or paste it into chat.
 
-### 3. Create a Shopify Partner account + app (if you don't have one already)
-- [partners.shopify.com](https://partners.shopify.com) → free account.
-- Create a new app, get your `SHOPIFY_API_KEY` / `SHOPIFY_API_SECRET`.
-- Scopes needed: `read_orders`, `read_inventory`, `read_products`.
-- Webhook topics to subscribe: `orders/create`, `orders/updated`, `orders/cancelled`, `refunds/create`, `inventory_levels/update`.
-- You'll also need to implement the 3 mandatory GDPR webhooks (`customers/data_request`, `customers/redact`, `shop/redact`) before Shopify will approve the app for the public App Store — not in this scaffold yet, flagged here so it doesn't surprise you at review time.
+### 3. Shopify app — already created and linked
+The app **Dockhand** exists under the "The Aetos" organization and is linked to
+this repo via `shopify app config link`, so `shopify.app.toml` is committed here.
+
+What that file already declares, so you don't set it anywhere else:
+- Scopes: `read_orders`, `read_inventory`, `read_products`.
+- Webhook subscriptions: `orders/create`, `orders/updated`, `orders/cancelled`, `refunds/create`, `inventory_levels/update`, all delivered to `/api/webhooks/shopify`.
+
+What you still need to do:
+- Copy `SHOPIFY_API_SECRET` from the app's page in the Partner dashboard into `.env.local`. It's the only Shopify secret, and the only Shopify variable any code reads. (The client ID is public and already prefilled as `NEXT_PUBLIC_SHOPIFY_API_KEY`.)
 - Create a development store under your Partner account to test against.
+- Run `shopify app dev` to get an HTTPS tunnel; it rewrites the app URLs in `shopify.app.toml` for you. Set `APP_BASE_URL` to that same tunnel URL for the session.
+
+Still outstanding: the 3 mandatory GDPR webhooks (`customers/data_request`, `customers/redact`, `shop/redact`) are required before Shopify will approve the app for the public App Store, and aren't implemented yet.
 
 ### 4. Create a ClickUp OAuth app
 - Log into ClickUp → **Settings → Apps → Create new app**.
@@ -59,13 +66,11 @@ The project already exists. Go to [supabase.com/dashboard](https://supabase.com/
 - **Deliberately not listing this in monday's marketplace** — their marketplace requires apps to be monetized through monday's own billing, which would stack a second revenue cut on top of Shopify's. A private OAuth app skips that; you lose monday-side discovery but keep your own billing.
 
 ### 6. Push to GitHub
-```bash
-git remote add origin <your empty GitHub repo URL>
-git push -u origin main
-```
+Already done — `origin` is https://github.com/AvTe/dockhand and the default
+branch is `main`. Nothing to do here on a fresh clone.
 
 ### 7. Connect Vercel
-Once the repo is on GitHub, import it in Vercel (or ask me to do it via the Vercel MCP tools in a future session — I can only do this after step 6, since Vercel needs a real git repo to import). Add all the `.env.local` values as Vercel environment variables, then `SHOPIFY_APP_URL` / `APP_BASE_URL` become your real Vercel URL instead of `localhost:3000`.
+Once the repo is on GitHub, import it in Vercel (or ask me to do it via the Vercel MCP tools in a future session — I can only do this after step 6, since Vercel needs a real git repo to import). Add all the `.env.local` values as Vercel environment variables, then set `APP_BASE_URL` to your real Vercel URL instead of `localhost:3000`. That single variable is both the Shopify app URL and the base for every OAuth redirect URI, so it also has to match the redirect URIs registered with ClickUp and Monday.
 
 ## Build order from here
 

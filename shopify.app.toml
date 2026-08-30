@@ -1,0 +1,38 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+client_id = "0de0af659b1350f4eac27b0c0d5b97be"
+application_url = "https://shopify.dev/apps/default-app-home"
+embedded = true
+name = "Dockhand"
+
+[webhooks]
+api_version = "2026-10"
+
+  # Delivered to src/app/api/webhooks/shopify/route.ts, which branches on the
+  # X-Shopify-Topic header. Relative uri resolves against application_url, so
+  # these are only correct once application_url is a real deployed origin.
+  [[webhooks.subscriptions]]
+  topics = [
+    "orders/create",
+    "orders/updated",
+    "orders/cancelled",
+    "refunds/create",
+    "inventory_levels/update",
+  ]
+  uri = "/api/webhooks/shopify"
+
+  # TODO (build order step 4): the 3 mandatory GDPR compliance webhooks
+  # (customers/data_request, customers/redact, shop/redact) go in a
+  # [webhooks.privacy_compliance] block. Not added yet because no route
+  # handles them -- declaring them now would just point Shopify at 404s.
+
+[access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+scopes = "read_orders,read_inventory,read_products"
+
+[auth]
+redirect_urls = [ "https://shopify.dev/apps/default-app-home/api/auth" ]
+
+[build]
+include_config_on_deploy = true
+automatically_update_urls_on_dev = true

@@ -75,13 +75,17 @@ before sinking more build time into features nobody's asked for yet.
 
 - **Supabase project**: name `dockhand`, project ref `bculzrjiuzaroyoyrecf`,
   org "Amit" (`tsfjzjicpmlslbtkaqja`), region `ap-south-1`, free tier.
-  Schema is already applied live (see `supabase/migrations/0001_init_schema.sql`
-  for the SQL, and the table descriptions below).
+  Schema is already applied live (see `supabase/migrations/` for the SQL, and
+  the table descriptions below). Applying further changes needs the Supabase
+  CLI linked first — see "Database migrations" under Operating this repo.
 - **Vercel team**: "avte's projects" (`team_niLPrV5FNUPXKMNfaJfSb6ev`), Pro
   plan. Not yet connected to this repo — connect it once you're ready to
   deploy (Vercel needs an existing git repo to import, which is why this
   step waited until after the GitHub push).
-- **GitHub repo**: https://github.com/AvTe/dockhand (this repo).
+- **GitHub repo**: https://github.com/AvTe/dockhand (this repo), default branch `main`.
+- **Shopify app**: "Dockhand", org "The Aetos", client_id
+  `0de0af659b1350f4eac27b0c0d5b97be`, linked via `shopify app config link`.
+  Config lives in `shopify.app.toml` — see "Shopify app configuration" below.
 
 ## Database schema
 
@@ -119,5 +123,152 @@ before sinking more build time into features nobody's asked for yet.
 3. Build the rules UI → writes to `rules`.
 4. Implement the 3 Shopify compliance webhooks.
 5. Add the Monday branch to `routeEvent()`.
-6. Connect the repo to Vercel, get a real deployed URL, update `SHOPIFY_APP_URL`/`APP_BASE_URL`.
+6. Connect the repo to Vercel, get a real deployed URL, set `APP_BASE_URL` to it, and update the redirect URIs registered with ClickUp and Monday to match.
 7. Submit for Shopify App Store review — budget for at least one rejection-and-fix round, that's normal.
+---
+
+# Operating this repo
+
+Everything above is product and business context. Everything below is how to
+work in the codebase: the commands, and the decisions that aren't visible
+from reading the source.
+
+## Commands
+
+| Command | Notes |
+|---|---|
+| `npm run dev` | Next.js dev server on :3000 |
+| `npm run build` | Production build |
+| `npm run typecheck` | `tsc --noEmit`. Fastest useful feedback loop — currently passes clean, so any output is a real regression |
+| `npm run lint` | `next lint`. Currently passes clean |
+
+There is **no test framework and no `test` script**. That's an unfilled gap,
+not a convention to discover the hard way — if you need tests, pick and wire
+up a runner deliberately rather than assuming Jest or Vitest is already there.
+
+`.eslintrc.json` (extends `next/core-web-vitals`) exists specifically so
+`next lint` runs non-interactively. Don't delete it: with no ESLint config
+file, `next lint` drops into a first-run "How would you like to configure
+ESLint?" prompt that hangs any non-interactive session.
+
+## Shopify app configuration
+
+The app is created and linked: **Dockhand**, org "The Aetos", client_id
+`0de0af659b1350f4eac27b0c0d5b97be`. `shopify.app.toml` is committed and is the
+**source of truth** for the client_id, the access scopes and the webhook
+subscriptions — the CLI pushes that file to Shopify, so changing scopes means
+editing it, not an env var. There is deliberately no `SHOPIFY_SCOPES` variable
+for the same reason `SHOPIFY_APP_URL` was removed. `.shopify/` is CLI-local
+state and self-ignores.
+
+`shopify.web.toml` exists so `shopify app dev` knows how to start this app
+(`npm run dev`). This repo was hand-scaffolded rather than created by
+`shopify app init`, so without that file the CLI finds no web component and the
+tunnel points at nothing.
+
+To run against a dev store: `shopify app dev`. Because
+`build.automatically_update_urls_on_dev = true`, that rewrites `application_url`
+and `redirect_urls` in `shopify.app.toml` to the generated tunnel URL. **Set
+`APP_BASE_URL` to that same tunnel URL for the session** — otherwise Shopify
+points at the tunnel while the ClickUp and Monday OAuth redirects still point at
+localhost.
+
+**Don't run `shopify app deploy` yet.** `application_url` and `redirect_urls` are
+still the generated `shopify.dev/apps/default-app-home` placeholders; deploying
+now would register those as the app's real URLs.
+
+The app is **embedded** (`embedded = true`) — a deliberate choice, since it
+renders inside the Shopify admin iframe, which is what App Store review expects
+and what Built for Shopify status requires. The consequence is that the rules UI
+(build order step 3) needs App Bridge and session-token auth rather than a plain
+cookie session, and that `NEXT_PUBLIC_SHOPIFY_API_KEY` is a real runtime need
+client-side. The client_id is public, so it's prefilled in `.env.example`;
+`SHOPIFY_API_SECRET` is the only genuine Shopify secret and the only Shopify
+variable any code reads today.
+
+Webhook subscriptions for the five business topics are declared in
+`[[webhooks.subscriptions]]` pointing at `/api/webhooks/shopify`. The three
+mandatory GDPR compliance webhooks are deliberately **not** declared yet — no
+route handles them, so declaring them would point Shopify at 404s. Build order
+step 4.
+
+## Database migrations — how a change actually reaches the live DB
+
+`supabase/migrations/` is real migration history, but it only reaches the live
+project through the Supabase CLI, installed here as a devDependency
+(`npx supabase`). **One-time setup per machine** — both steps are interactive,
+so a coding agent cannot do them for you:
+
+```bash
+npx supabase login
+npx supabase link --project-ref bculzrjiuzaroyoyrecf
+```
+
+After that:
+
+```bash
+npx supabase migration new <name>   # creates a correctly-named empty migration
+npx supabase migration list         # local files vs. what's applied remotely
+npx supabase db push                # apply local migrations not yet on the remote
+```
+
+Two properties to preserve:
+
+- **Filenames must stay `<timestamp>_name.sql`.** The CLI parses the leading
+  digits as the migration version and matches them against the remote history.
+  The first two files were originally `0001_`/`0002_` and were renamed to their
+  real remote versions so the two histories line up. A new file hand-named
+  `0003_something.sql` would read as an unapplied migration and get re-run
+  against a live schema. `migration new` gets the naming right for you.
+- **Editing an already-applied migration file does nothing.** The remote tracks
+  applied versions; rewriting old SQL in place is a silent no-op. Always add a
+  new migration.
+
+Historical note: `20260830110400_init_schema` and
+`20260830113406_drop_order_tagged_trigger` were both applied out-of-band (via
+dashboard/MCP) before the CLI was linked, then reconciled by renaming. From
+here, the CLI is the path.
+
+## Schema values are CHECK-constrained enums
+
+`rules.trigger_event` is `('order_created', 'low_stock', 'refund')` and
+`integrations.provider` is `('clickup', 'monday')`, both enforced by CHECK
+constraints. Adding a trigger or a third provider is a migration, not just a
+code change, and the constraint must be dropped and re-added rather than
+altered in place.
+
+`order_tagged` was in that constraint and was removed — see
+`20260830113406_drop_order_tagged_trigger.sql` for the full reasoning. Short
+version: nothing could ever produce it. Tag routing today is a `condition`
+jsonb check inside `order_created`. A genuine `order_tagged` trigger needs the
+`orders/updated` topic plus stored prior tag state to diff against, because
+Shopify's payload doesn't say what changed.
+
+## Supabase clients
+
+`getSupabaseAdmin()` in `src/lib/supabase.ts` uses the **service role key and
+bypasses row-level security**. Server-only: importing it into a `"use client"`
+component would ship a full-access key to the browser.
+
+There is deliberately **no browser/anon Supabase client yet**, because nothing
+user-facing reads from the database. Building the rules UI (build order step 3)
+means adding one *and* writing RLS policies — the tables currently have none,
+which is only safe while the service-role client is the sole reader.
+
+## Environment
+
+One origin variable: **`APP_BASE_URL`**. It is the Shopify app URL *and* the
+base that every OAuth redirect URI is built from (both the ClickUp and Monday
+authorize and callback routes). A second `SHOPIFY_APP_URL` used to exist that
+no code ever read; it was removed, because two names for one value is exactly
+how you set the wrong one in Vercel and get a silently broken redirect.
+Whatever it's set to must match the redirect URIs registered in the ClickUp and
+Monday developer consoles.
+
+`SUPABASE_SERVICE_ROLE_KEY` is the only value in `.env.example` not pre-filled.
+The `NEXT_PUBLIC_*` Supabase values there are real and frontend-safe by design.
+
+## TypeScript
+
+`strict` plus `noUncheckedIndexedAccess`, so indexed access yields
+`T | undefined` and needs narrowing. Path alias `@/*` → `src/*`.

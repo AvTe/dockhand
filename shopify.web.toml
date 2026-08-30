@@ -1,0 +1,9 @@
+# Tells the Shopify CLI how to run this app during `shopify app dev`.
+# This repo was scaffolded by hand (not `shopify app init`), so without this
+# file the CLI has no web component to start and the tunnel points at nothing.
+
+name = "dockhand"
+roles = ["frontend", "backend"]
+
+[commands]
+dev = "npm run dev"
