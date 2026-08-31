@@ -19,7 +19,20 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "invalid or expired state" }, { status: 403 });
   }
 
-  const { access_token } = await exchangeMondayCode(code);
+  let access_token: string;
+  try {
+    ({ access_token } = await exchangeMondayCode(code));
+  } catch (err) {
+    console.error("monday OAuth callback failed", err);
+    return NextResponse.json(
+      {
+        error: "Could not complete the monday connection",
+        detail: String(err),
+        hint: "The state nonce is single-use and has now been spent. Start the connection again from the app.",
+      },
+      { status: 502 }
+    );
+  }
 
   const supabase = getSupabaseAdmin();
   const { error } = await supabase.from("integrations").upsert(

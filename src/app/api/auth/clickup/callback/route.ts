@@ -25,9 +25,27 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "invalid or expired state" }, { status: 403 });
   }
 
-  const { access_token } = await exchangeClickUpCode(code);
-  const workspaces = await getClickUpAuthorizedWorkspaces(access_token);
-  const firstWorkspace = workspaces.teams?.[0];
+  // Everything past this point talks to ClickUp, which can fail for reasons
+  // that are entirely diagnosable -- a missing client secret, a rejected code,
+  // a rate limit. Left unguarded these throw and Next returns a bare 500 with
+  // no body, which tells the merchant (and us) nothing.
+  let access_token: string;
+  let firstWorkspace: { id?: string; name?: string } | undefined;
+  try {
+    ({ access_token } = await exchangeClickUpCode(code));
+    const workspaces = await getClickUpAuthorizedWorkspaces(access_token);
+    firstWorkspace = workspaces.teams?.[0];
+  } catch (err) {
+    console.error("ClickUp OAuth callback failed", err);
+    return NextResponse.json(
+      {
+        error: "Could not complete the ClickUp connection",
+        detail: String(err),
+        hint: "The state nonce is single-use and has now been spent. Start the connection again from the app.",
+      },
+      { status: 502 }
+    );
+  }
 
   const supabase = getSupabaseAdmin();
   const { error } = await supabase.from("integrations").upsert(

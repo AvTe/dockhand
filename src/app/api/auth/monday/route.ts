@@ -8,9 +8,18 @@ import { supabaseOAuthStateStore } from "@/lib/oauth/stateStore";
 export async function GET(req: NextRequest) {
   const clientId = process.env.MONDAY_CLIENT_ID;
   const appBaseUrl = process.env.APP_BASE_URL;
-  if (!clientId || !appBaseUrl) {
+  // The secret is not used until the callback, but check it here: a missing
+  // secret otherwise only surfaces as a failed token exchange after the
+  // merchant has already been bounced through the provider consent screen.
+  const clientSecret = process.env.MONDAY_CLIENT_SECRET;
+  const missing = [
+    !clientId ? "MONDAY_CLIENT_ID" : null,
+    !clientSecret ? "MONDAY_CLIENT_SECRET" : null,
+    !appBaseUrl ? "APP_BASE_URL" : null,
+  ].filter(Boolean);
+  if (missing.length > 0 || !clientId || !appBaseUrl) {
     return NextResponse.json(
-      { error: "MONDAY_CLIENT_ID or APP_BASE_URL is not set" },
+      { error: `Not configured on the server: ${missing.join(", ")}` },
       { status: 500 }
     );
   }
