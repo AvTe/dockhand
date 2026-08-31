@@ -1,6 +1,6 @@
 import { ensureShop } from "@/lib/shopify/ensureShop";
 import { getSupabaseAdmin } from "@/lib/supabase";
-import { getClickUpSpaces } from "@/lib/clickup/client";
+import { getClickUpMembers, getClickUpSpaces } from "@/lib/clickup/client";
 import { RulesManager, type RuleRow } from "./RulesManager";
 
 /**
@@ -81,11 +81,12 @@ export default async function Home({
 
   const { data: rules } = await supabase
     .from("rules")
-    .select("id, trigger_event, target_list_id, condition, enabled")
+    .select("id, trigger_event, target_list_id, condition, assignee, enabled")
     .eq("shop_id", shopId)
     .order("created_at", { ascending: false });
 
   let spaces: { id: string; name: string }[] = [];
+  let members: { id: string; name: string }[] = [];
   let spacesError: string | null = null;
   try {
     if (integration.workspace_id) {
@@ -94,6 +95,10 @@ export default async function Home({
         integration.workspace_id as string
       );
       spaces = res.spaces.map((s) => ({ id: s.id, name: s.name }));
+      members = await getClickUpMembers(
+        integration.access_token as string,
+        integration.workspace_id as string
+      );
     }
   } catch (err) {
     spacesError = String(err);
@@ -118,7 +123,7 @@ export default async function Home({
         </s-section>
       ) : null}
 
-      <RulesManager rules={(rules ?? []) as RuleRow[]} spaces={spaces} />
+      <RulesManager rules={(rules ?? []) as RuleRow[]} spaces={spaces} members={members} />
     </s-page>
   );
 }

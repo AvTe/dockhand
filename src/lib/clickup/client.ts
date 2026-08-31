@@ -45,6 +45,9 @@ export async function createClickUpTask(params: {
   name: string;
   description?: string;
   dueDateMs?: number;
+  /** ClickUp member ids. An empty array leaves the task unassigned, and an
+   *  unassigned task notifies nobody -- ClickUp only alerts assignees. */
+  assignees?: string[];
 }) {
   const res = await fetch(`${CLICKUP_API_BASE}/list/${params.listId}/task`, {
     method: "POST",
@@ -56,6 +59,7 @@ export async function createClickUpTask(params: {
       name: params.name,
       description: params.description ?? "",
       due_date: params.dueDateMs,
+      assignees: params.assignees ?? [],
     }),
   });
 
@@ -95,4 +99,28 @@ export async function getClickUpFolderlessLists(accessToken: string, spaceId: st
     throw new Error(`ClickUp get lists failed: ${res.status} ${await res.text()}`);
   }
   return res.json() as Promise<{ lists: { id: string; name: string }[] }>;
+}
+
+/**
+ * Workspace members, for the rules UI's assignee picker.
+ *
+ * ClickUp only notifies people who are assigned to a task, so a rule with no
+ * assignee produces tasks that land silently -- which is exactly what happened
+ * before this existed.
+ */
+export async function getClickUpMembers(accessToken: string, teamId: string) {
+  const res = await fetch(`${CLICKUP_API_BASE}/team`, {
+    headers: { Authorization: accessToken },
+  });
+  if (!res.ok) {
+    throw new Error(`ClickUp get members failed: ${res.status} ${await res.text()}`);
+  }
+  const body = (await res.json()) as {
+    teams?: { id: string; members?: { user?: { id: number; username?: string; email?: string } }[] }[];
+  };
+  const team = body.teams?.find((t) => String(t.id) === String(teamId));
+  return (team?.members ?? [])
+    .map((m) => m.user)
+    .filter((u): u is { id: number; username?: string; email?: string } => Boolean(u))
+    .map((u) => ({ id: String(u.id), name: u.username || u.email || String(u.id) }));
 }

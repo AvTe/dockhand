@@ -8,6 +8,7 @@ import { mergeSpaceLists, type PickableList } from "@/lib/clickup/lists";
 import {
   getClickUpFolderlessLists,
   getClickUpFolders,
+  getClickUpMembers,
   getClickUpSpaces,
 } from "@/lib/clickup/client";
 
@@ -45,6 +46,7 @@ export async function createRule(sessionToken: string, input: RuleInput) {
     trigger_event: parsed.triggerEvent,
     condition: parsed.condition,
     target_list_id: parsed.targetListId,
+    assignee: parsed.assignee,
   });
 
   if (error) throw new Error(error.message);
@@ -112,4 +114,15 @@ export async function listListsInSpace(
   ]);
 
   return mergeSpaceLists(folders, lists);
+}
+
+export async function listMembers(sessionToken: string) {
+  const shopId = await resolveShopId(sessionToken);
+  const integration = await clickupIntegration(shopId);
+  if (!integration?.workspace_id) return [];
+
+  return getClickUpMembers(
+    integration.access_token as string,
+    integration.workspace_id as string
+  );
 }

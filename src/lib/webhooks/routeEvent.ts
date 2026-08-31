@@ -1,15 +1,18 @@
+import { buildTaskBody } from "./taskBody";
+
 /**
  * Turns a verified Shopify webhook into task-tool tasks.
  *
- * Extracted from the route handler and given injected dependencies so the
- * routing decisions -- which topics act, which rules match, how many tasks get
- * made -- are testable without a database or a live ClickUp workspace.
+ * Dependencies are injected so the routing decisions -- which topics act, which
+ * rules match, how many tasks get made, who they land on -- are testable
+ * without a database or a live ClickUp workspace.
  */
 
 export type RuleRow = {
   id: string;
   target_list_id: string;
   condition: Record<string, unknown> | null;
+  assignee?: string | null;
 };
 
 export type RouteDeps = {
@@ -22,6 +25,7 @@ export type RouteDeps = {
     listId: string;
     name: string;
     description: string;
+    assignees: string[];
   }): Promise<{ id: string }>;
 };
 
@@ -44,45 +48,36 @@ export function ruleConditionMatches(
 ): boolean {
   if (!condition || Object.keys(condition).length === 0) return true;
 
+  // Stock threshold. Shopify sends inventory_levels/update on ANY change,
+  // including the decrease caused by a sale, so without a threshold every
+  // order also produces a "Restock" task.
+  if (condition.below !== undefined) {
+    const below = Number(condition.below);
+    const available = Number(payload.available);
+    if (!Number.isFinite(below) || !Number.isFinite(available)) return false;
+    if (available >= below) return false;
+  }
+
   if (condition.tag && typeof payload.tags === "string") {
-    return payload.tags
-      .split(",")
-      .map((t) => t.trim())
-      .includes(condition.tag as string);
+    const tags = payload.tags.split(",").map((t) => t.trim());
+    if (!tags.includes(condition.tag as string)) return false;
   }
 
   return true;
 }
 
-export function buildTaskTitle(
-  triggerEvent: string,
-  payload: Record<string, unknown>
-): string {
-  switch (triggerEvent) {
-    case "order_created":
-      return `Pack & ship #${payload.order_number ?? payload.id}`;
-    case "refund":
-      return `Handle refund for order #${payload.order_id}`;
-    case "low_stock":
-      return `Restock: ${payload.sku ?? payload.inventory_item_id}`;
-    default:
-      return "New task from Dockhand";
-  }
-}
-
 /**
  * Returns the ids of every task created, so the caller can record them on the
- * sync_events row. Previously the created task was discarded, which left
- * sync_events.created_task_ref null on every successful delivery and made the
- * audit log unable to point at what it had produced.
+ * sync_events row.
  */
 export async function routeEvent(args: {
   shopId: string;
+  shopDomain: string;
   topic: string;
   payload: Record<string, unknown>;
   deps: RouteDeps;
 }): Promise<string[]> {
-  const { shopId, topic, payload, deps } = args;
+  const { shopId, shopDomain, topic, payload, deps } = args;
 
   const triggerEvent = mapTopicToTrigger(topic);
   if (!triggerEvent) return [];
@@ -96,11 +91,14 @@ export async function routeEvent(args: {
   for (const rule of rules) {
     if (!ruleConditionMatches(rule.condition, payload)) continue;
 
+    const { name, description } = buildTaskBody(triggerEvent, payload, shopDomain);
+
     const task = await deps.createTask({
       accessToken: integration.access_token,
       listId: rule.target_list_id,
-      name: buildTaskTitle(triggerEvent, payload),
-      description: JSON.stringify(payload, null, 2),
+      name,
+      description,
+      assignees: rule.assignee ? [rule.assignee] : [],
     });
     created.push(task.id);
   }

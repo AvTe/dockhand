@@ -33,6 +33,7 @@ test("returns the id of the task it created", async () => {
 
   const refs = await routeEvent({
     shopId: SHOP,
+    shopDomain: "quickstart-6edde43f.myshopify.com",
     topic: "orders/create",
     payload: { order_number: 1001 },
     deps: d,
@@ -46,6 +47,7 @@ test("creates one task per matching rule", async () => {
 
   const refs = await routeEvent({
     shopId: SHOP,
+    shopDomain: "quickstart-6edde43f.myshopify.com",
     topic: "orders/create",
     payload: { order_number: 1001 },
     deps: d,
@@ -62,6 +64,7 @@ test("creates nothing when the shop has no ClickUp integration", async () => {
 
   const refs = await routeEvent({
     shopId: SHOP,
+    shopDomain: "quickstart-6edde43f.myshopify.com",
     topic: "orders/create",
     payload: {},
     deps: d,
@@ -76,6 +79,7 @@ test("skips a rule whose tag condition does not match the order", async () => {
 
   const refs = await routeEvent({
     shopId: SHOP,
+    shopDomain: "quickstart-6edde43f.myshopify.com",
     topic: "orders/create",
     payload: { order_number: 7, tags: "retail, vip" },
     deps: d,
@@ -89,6 +93,7 @@ test("creates nothing for a topic no trigger maps to", async () => {
 
   const refs = await routeEvent({
     shopId: SHOP,
+    shopDomain: "quickstart-6edde43f.myshopify.com",
     topic: "orders/updated",
     payload: {},
     deps: d,
@@ -106,4 +111,63 @@ test("maps only the topics the app acts on", () => {
 
 test("an empty condition matches everything", () => {
   expect(ruleConditionMatches({}, { tags: "anything" })).toBe(true);
+});
+
+test("skips a low_stock rule while stock is still above its threshold", async () => {
+  // Without this, every sale fires a "Restock" task, because a sale is just an
+  // inventory decrease. Observed in production: order #1002 produced both a
+  // pack task and a spurious restock.
+  const d = deps({ async findRules() { return [rule({ condition: { below: 5 } })]; } });
+
+  const refs = await routeEvent({
+    shopId: SHOP,
+    shopDomain: "quickstart-6edde43f.myshopify.com",
+    topic: "inventory_levels/update",
+    payload: { inventory_item_id: 42, available: 9 },
+    deps: d,
+  });
+
+  expect(refs).toEqual([]);
+});
+
+test("creates a low_stock task once stock falls below its threshold", async () => {
+  const d = deps({ async findRules() { return [rule({ condition: { below: 5 } })]; } });
+
+  const refs = await routeEvent({
+    shopId: SHOP,
+    shopDomain: "quickstart-6edde43f.myshopify.com",
+    topic: "inventory_levels/update",
+    payload: { inventory_item_id: 42, available: 3 },
+    deps: d,
+  });
+
+  expect(refs).toEqual(["task-1"]);
+});
+
+test("assigns the task to the rule's assignee", async () => {
+  const d = deps({ async findRules() { return [rule({ assignee: "12345" })]; } });
+
+  await routeEvent({
+    shopId: SHOP,
+    shopDomain: "quickstart-6edde43f.myshopify.com",
+    topic: "orders/create",
+    payload: { order_number: 1001 },
+    deps: d,
+  });
+
+  expect(d.created[0]).toMatchObject({ assignees: ["12345"] });
+});
+
+test("creates an unassigned task when the rule names no assignee", async () => {
+  const d = deps({ async findRules() { return [rule()]; } });
+
+  await routeEvent({
+    shopId: SHOP,
+    shopDomain: "quickstart-6edde43f.myshopify.com",
+    topic: "orders/create",
+    payload: { order_number: 1001 },
+    deps: d,
+  });
+
+  expect(d.created[0]).toMatchObject({ assignees: [] });
 });

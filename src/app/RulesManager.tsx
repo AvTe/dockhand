@@ -10,6 +10,7 @@ export type RuleRow = {
   trigger_event: string;
   target_list_id: string;
   condition: Record<string, unknown> | null;
+  assignee: string | null;
   enabled: boolean;
 };
 
@@ -28,9 +29,11 @@ async function sessionToken(): Promise<string> {
 export function RulesManager({
   rules,
   spaces,
+  members,
 }: {
   rules: RuleRow[];
   spaces: { id: string; name: string }[];
+  members: { id: string; name: string }[];
 }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -39,6 +42,8 @@ export function RulesManager({
   const [spaceId, setSpaceId] = useState<string>("");
   const [targetListId, setTargetListId] = useState<string>("");
   const [tag, setTag] = useState<string>("");
+  const [threshold, setThreshold] = useState<string>("5");
+  const [assignee, setAssignee] = useState<string>("");
 
   function run(fn: () => Promise<void>) {
     setError(null);
@@ -83,6 +88,16 @@ export function RulesManager({
             ))}
           </s-select>
 
+          {trigger === "low_stock" ? (
+            <s-text-field
+              label="Alert when stock falls below"
+              value={threshold}
+              placeholder="5"
+              details="Required. Shopify reports every stock change, including the drop from an ordinary sale, so without a threshold every order would raise a restock task."
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setThreshold(e.target.value)}
+            />
+          ) : null}
+
           {trigger === "order_created" ? (
             <s-text-field
               label="Only if the order is tagged (optional)"
@@ -122,6 +137,20 @@ export function RulesManager({
             ))}
           </s-select>
 
+          <s-select
+            label="Assign to"
+            value={assignee}
+            placeholder="Nobody (task will not notify anyone)"
+            onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setAssignee(e.target.value)}
+          >
+            <s-option value="">Nobody</s-option>
+            {members.map((m) => (
+              <s-option key={m.id} value={m.id}>
+                {m.name}
+              </s-option>
+            ))}
+          </s-select>
+
           <s-button
             variant="primary"
             disabled={pending || !targetListId}
@@ -131,6 +160,8 @@ export function RulesManager({
                   triggerEvent: trigger,
                   targetListId,
                   tag,
+                  threshold,
+                  assignee,
                 });
                 setTargetListId("");
                 setTag("");
@@ -158,6 +189,14 @@ export function RulesManager({
                   {rule.condition && typeof rule.condition.tag === "string" ? (
                     <s-badge tone="info">tag: {rule.condition.tag}</s-badge>
                   ) : null}
+                  {rule.condition && typeof rule.condition.below === "number" ? (
+                    <s-badge tone="info">below {rule.condition.below}</s-badge>
+                  ) : null}
+                  <s-badge tone={rule.assignee ? "info" : "warning"}>
+                    {rule.assignee
+                      ? (members.find((m) => m.id === rule.assignee)?.name ?? "assigned")
+                      : "unassigned"}
+                  </s-badge>
                   <s-badge tone={rule.enabled ? "success" : "neutral"}>
                     {rule.enabled ? "Enabled" : "Paused"}
                   </s-badge>

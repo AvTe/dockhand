@@ -77,7 +77,7 @@ export async function POST(req: NextRequest) {
     async findRules(shopId, triggerEvent) {
       const { data } = await supabase
         .from("rules")
-        .select("id, target_list_id, condition")
+        .select("id, target_list_id, condition, assignee")
         .eq("shop_id", shopId)
         .eq("trigger_event", triggerEvent)
         .eq("enabled", true);
@@ -85,10 +85,11 @@ export async function POST(req: NextRequest) {
         id: string;
         target_list_id: string;
         condition: Record<string, unknown> | null;
+        assignee: string | null;
       }[];
     },
-    async createTask({ accessToken, listId, name, description }) {
-      const task = await createClickUpTask({ accessToken, listId, name, description });
+    async createTask({ accessToken, listId, name, description, assignees }) {
+      const task = await createClickUpTask({ accessToken, listId, name, description, assignees });
       return { id: String(task.id) };
     },
   };
@@ -96,6 +97,7 @@ export async function POST(req: NextRequest) {
   try {
     const createdTaskRefs = await routeEvent({
       shopId: shop.id,
+      shopDomain,
       topic,
       payload,
       deps,
