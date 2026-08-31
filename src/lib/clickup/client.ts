@@ -64,3 +64,35 @@ export async function createClickUpTask(params: {
   }
   return res.json();
 }
+
+export async function getClickUpSpaces(accessToken: string, teamId: string) {
+  const res = await fetch(`${CLICKUP_API_BASE}/team/${teamId}/space?archived=false`, {
+    headers: { Authorization: accessToken },
+  });
+  if (!res.ok) {
+    throw new Error(`ClickUp get spaces failed: ${res.status} ${await res.text()}`);
+  }
+  return res.json() as Promise<{ spaces: { id: string; name: string }[] }>;
+}
+
+export async function getClickUpFolders(accessToken: string, spaceId: string) {
+  const res = await fetch(`${CLICKUP_API_BASE}/space/${spaceId}/folder?archived=false`, {
+    headers: { Authorization: accessToken },
+  });
+  if (!res.ok) {
+    throw new Error(`ClickUp get folders failed: ${res.status} ${await res.text()}`);
+  }
+  return res.json() as Promise<{
+    folders: { id: string; name: string; lists?: { id: string; name: string }[] }[];
+  }>;
+}
+
+export async function getClickUpFolderlessLists(accessToken: string, spaceId: string) {
+  const res = await fetch(`${CLICKUP_API_BASE}/space/${spaceId}/list?archived=false`, {
+    headers: { Authorization: accessToken },
+  });
+  if (!res.ok) {
+    throw new Error(`ClickUp get lists failed: ${res.status} ${await res.text()}`);
+  }
+  return res.json() as Promise<{ lists: { id: string; name: string }[] }>;
+}
