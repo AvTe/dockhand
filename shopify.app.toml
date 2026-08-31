@@ -8,29 +8,20 @@ name = "Dockhand"
 [webhooks]
 api_version = "2026-10"
 
-  # Only inventory_levels/update is active right now. It is the one topic this
-  # app needs that carries NO protected customer data, so it subscribes without
-  # approval.
+  # No protected customer data in this one, so it needs no special approval.
   [[webhooks.subscriptions]]
   topics = [ "inventory_levels/update" ]
   uri = "/api/webhooks/shopify"
 
-  # BLOCKED ON APPROVAL -- uncomment the block below once the app has been
-  # granted Protected Customer Data access in the Partner Dashboard
-  # (Apps -> Dockhand -> API access -> Protected customer data access).
-  # Order and refund payloads contain customer PII, so subscribing without that
-  # approval makes `shopify app dev` fail outright with
-  # "This app is not approved to subscribe to webhook topics containing
-  # protected customer data."
+  # Order and refund payloads carry protected customer data. These stay
+  # subscribed only while the app holds Protected Customer Data access in the
+  # Partner Dashboard; without it, `shopify app dev` fails to start.
   #
-  # Only these two are listed, not orders/updated or orders/cancelled:
-  # mapTopicToTrigger() in src/app/api/webhooks/shopify/route.ts returns null
-  # for those, so subscribing to them would deliver events that no-op.
-  # Add them here at the same time as the code that handles them.
-  #
-  #   [[webhooks.subscriptions]]
-  #   topics = [ "orders/create", "refunds/create" ]
-  #   uri = "/api/webhooks/shopify"
+  # Deliberately not orders/updated or orders/cancelled: mapTopicToTrigger()
+  # returns null for both, so subscribing would deliver events that no-op.
+  [[webhooks.subscriptions]]
+  topics = [ "orders/create", "refunds/create" ]
+  uri = "/api/webhooks/shopify"
 
   # TODO (build order step 4): the 3 mandatory GDPR compliance webhooks
   # (customers/data_request, customers/redact, shop/redact) go in a
