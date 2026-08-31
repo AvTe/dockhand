@@ -13,18 +13,18 @@ api_version = "2026-10"
   topics = [ "inventory_levels/update" ]
   uri = "/api/webhooks/shopify"
 
-  # BLOCKED: Shopify rejects the deploy with "This app is not approved to
-  # subscribe to webhook topics containing protected customer data" until
-  # Protected Customer Data access is actually granted in the Partner
-  # Dashboard. Requesting it is not enough -- the data-protection details
-  # have to be completed and the request approved. Uncomment then.
+  # Order and refund payloads carry protected customer data. These require the
+  # data use to be selected under Protected customer data access in the Partner
+  # Dashboard (reasons: Store management, App functionality). No optional
+  # customer fields are requested, so Shopify redacts name/email/phone/address
+  # from these payloads -- which is what we want, since a task only needs the
+  # order number.
   #
   # Deliberately not orders/updated or orders/cancelled: mapTopicToTrigger()
   # returns null for both, so subscribing would deliver events that no-op.
-  #
-  #   [[webhooks.subscriptions]]
-  #   topics = [ "orders/create", "refunds/create" ]
-  #   uri = "/api/webhooks/shopify"
+  [[webhooks.subscriptions]]
+  topics = [ "orders/create", "refunds/create" ]
+  uri = "/api/webhooks/shopify"
 
   # TODO (build order step 4): the 3 mandatory GDPR compliance webhooks
   # (customers/data_request, customers/redact, shop/redact) go in a
