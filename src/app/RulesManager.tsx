@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { createRule, deleteRule, setRuleEnabled, listListsInSpace } from "./actions/rules";
+import { reconcileNow } from "./actions/reconcile";
 import { TRIGGER_EVENTS } from "@/lib/rules/ruleInput";
 import type { PickableList } from "@/lib/clickup/lists";
 
@@ -44,6 +45,7 @@ export function RulesManager({
   const [tag, setTag] = useState<string>("");
   const [threshold, setThreshold] = useState<string>("5");
   const [assignee, setAssignee] = useState<string>("");
+  const [recovery, setRecovery] = useState<string | null>(null);
 
   function run(fn: () => Promise<void>) {
     setError(null);
@@ -73,6 +75,32 @@ export function RulesManager({
           <s-paragraph>{error}</s-paragraph>
         </s-banner>
       ) : null}
+
+      <s-section heading="Missed orders">
+        <s-stack direction="block" gap="base">
+          <s-paragraph>
+            Shopify stops retrying a failed webhook after about 48 hours. If Dockhand
+            was unreachable when an order came in, that order never became a task.
+            This checks the last 25 orders and creates tasks for any that were missed.
+          </s-paragraph>
+          {recovery ? <s-banner heading="Check complete" tone="info"><s-paragraph>{recovery}</s-paragraph></s-banner> : null}
+          <s-button
+            disabled={pending}
+            onClick={() =>
+              run(async () => {
+                const result = await reconcileNow(await sessionToken());
+                const failed = result.failed?.length ?? 0;
+                setRecovery(
+                  `Recovered ${result.recovered.length}, already handled ${result.skipped.length}` +
+                    (failed > 0 ? `, failed ${failed}` : "")
+                );
+              })
+            }
+          >
+            Check for missed orders
+          </s-button>
+        </s-stack>
+      </s-section>
 
       <s-section heading="Add a rule">
         <s-stack direction="block" gap="base">

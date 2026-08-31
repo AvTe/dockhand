@@ -32,6 +32,16 @@ export async function POST(req: NextRequest) {
   }
 
   const payload = JSON.parse(rawBody);
+
+  // Which Shopify resource this concerned, so reconciliation can later tell
+  // whether an order was ever handled. The webhook id cannot answer that: a
+  // redelivery carries a different one, and a recovered order has none.
+  const resourceId =
+    payload.id !== undefined
+      ? String(payload.id)
+      : payload.inventory_item_id !== undefined
+        ? String(payload.inventory_item_id)
+        : null;
   const supabase = getSupabaseAdmin();
 
   const { data: shop, error: shopError } = await supabase
@@ -52,6 +62,7 @@ export async function POST(req: NextRequest) {
     shop_id: shop.id,
     shopify_webhook_id: webhookId,
     event_type: topic,
+    resource_id: resourceId,
     payload,
     status: "success", // optimistic; corrected below
   });

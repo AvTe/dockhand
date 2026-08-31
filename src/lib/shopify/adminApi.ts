@@ -59,3 +59,60 @@ export async function getProductTitleForInventoryItem(
     return null;
   }
 }
+
+/**
+ * Recent orders, newest first, for reconciliation.
+ *
+ * Returns the numeric id rather than the gid, because that is what a webhook
+ * payload carries and therefore what sync_events.resource_id holds. Returns an
+ * empty list rather than throwing: reconciliation is a safety net and must
+ * never be the thing that breaks a page load.
+ */
+export async function getRecentOrders(
+  shopDomain: string,
+  accessToken: string,
+  limit = 25
+): Promise<Record<string, unknown>[]> {
+  const query = `
+    query ($first: Int!) {
+      orders(first: $first, sortKey: CREATED_AT, reverse: true) {
+        nodes {
+          id
+          name
+          createdAt
+          displayFinancialStatus
+          currentTotalPriceSet { shopMoney { amount currencyCode } }
+          lineItems(first: 10) { nodes { title quantity sku } }
+        }
+      }
+    }
+  `;
+
+  try {
+    const json = (await adminGraphql(shopDomain, accessToken, query, { first: limit })) as {
+      data?: { orders?: { nodes?: Record<string, unknown>[] } };
+    };
+
+    return (json.data?.orders?.nodes ?? []).map((node) => {
+      const gid = String(node.id ?? "");
+      const numericId = gid.split("/").pop() ?? gid;
+      const money = (
+        node.currentTotalPriceSet as { shopMoney?: { amount?: string; currencyCode?: string } }
+      )?.shopMoney;
+      const lineItems = (node.lineItems as { nodes?: unknown[] })?.nodes ?? [];
+
+      // Reshaped to look like a webhook payload so the same task builder and
+      // routing logic handle both paths without special cases.
+      return {
+        id: numericId,
+        order_number: String(node.name ?? "").replace(/^#/, ""),
+        financial_status: String(node.displayFinancialStatus ?? "").toLowerCase(),
+        total_price: money?.amount,
+        currency: money?.currencyCode,
+        line_items: lineItems,
+      };
+    });
+  } catch {
+    return [];
+  }
+}

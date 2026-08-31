@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { getProductTitleForInventoryItem } from "./adminApi";
+import { getProductTitleForInventoryItem, getRecentOrders } from "./adminApi";
 
 const SHOP = "quickstart-6edde43f.myshopify.com";
 
@@ -46,4 +46,30 @@ test("returns null rather than throwing when the lookup fails", async () => {
   await expect(
     getProductTitleForInventoryItem(SHOP, "tok", 1)
   ).resolves.toBeNull();
+});
+
+test("lists recent orders for reconciliation", async () => {
+  const calls = stubGraphql(200, {
+    data: {
+      orders: {
+        nodes: [
+          { id: "gid://shopify/Order/111", name: "#1001", createdAt: "2026-08-31T10:00:00Z" },
+        ],
+      },
+    },
+  });
+
+  const orders = await getRecentOrders(SHOP, "tok", 10);
+
+  expect(orders).toHaveLength(1);
+  // Reconciliation matches against sync_events.resource_id, which holds the
+  // numeric id the webhook payload carries -- not the gid.
+  expect(orders[0]?.id).toBe("111");
+  expect(String(calls[0]?.body.query)).toContain("orders");
+});
+
+test("returns an empty list rather than throwing when orders cannot be fetched", async () => {
+  stubGraphql(500, { errors: [{ message: "boom" }] });
+
+  await expect(getRecentOrders(SHOP, "tok", 10)).resolves.toEqual([]);
 });
