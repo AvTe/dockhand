@@ -1,7 +1,7 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
 client_id = "0de0af659b1350f4eac27b0c0d5b97be"
-application_url = "https://shopify.dev/apps/default-app-home"
+application_url = "https://dockhand-4cks.vercel.app"
 embedded = true
 name = "Dockhand"
 
@@ -42,7 +42,7 @@ api_version = "2026-10"
 scopes = "read_orders,read_inventory,read_products"
 
 [auth]
-redirect_urls = [ "https://shopify.dev/apps/default-app-home/api/auth" ]
+redirect_urls = [ "https://dockhand-4cks.vercel.app/api/auth" ]
 
 [build]
 include_config_on_deploy = true
