@@ -1,14 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { exchangeMondayCode } from "@/lib/monday/client";
 import { getSupabaseAdmin } from "@/lib/supabase";
+import { supabaseOAuthStateStore } from "@/lib/oauth/stateStore";
 
+/**
+ * Step 2 of monday's OAuth flow. Same state handling as ClickUp's callback.
+ */
 export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get("code");
-  const shopId = req.nextUrl.searchParams.get("shop_id");
-  // TODO: same `state` verification note as the ClickUp callback.
+  const state = req.nextUrl.searchParams.get("state");
 
-  if (!code || !shopId) {
-    return NextResponse.json({ error: "missing code or shop_id" }, { status: 400 });
+  if (!code || !state) {
+    return NextResponse.json({ error: "missing code or state" }, { status: 400 });
+  }
+
+  const consumed = await supabaseOAuthStateStore.consume(state, "monday");
+  if (!consumed) {
+    return NextResponse.json({ error: "invalid or expired state" }, { status: 403 });
   }
 
   const { access_token } = await exchangeMondayCode(code);
@@ -16,7 +24,7 @@ export async function GET(req: NextRequest) {
   const supabase = getSupabaseAdmin();
   const { error } = await supabase.from("integrations").upsert(
     {
-      shop_id: shopId,
+      shop_id: consumed.shopId,
       provider: "monday",
       access_token,
     },
