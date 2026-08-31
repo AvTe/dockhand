@@ -16,8 +16,10 @@ const order = {
   shipping_address: { country: "India" },
 };
 
-test("names an order task after its order number", () => {
-  expect(buildTaskBody("order_created", order, SHOP).name).toBe("Pack & ship #1003");
+test("names an order task after what was bought", () => {
+  expect(buildTaskBody("order_created", order, SHOP).name).toBe(
+    "Blue T-Shirt +1 more - Placed"
+  );
 });
 
 test("lists what was ordered, with quantities", () => {
@@ -64,6 +66,79 @@ test("names a refund task after the order it refunds", () => {
 test("reports remaining stock on a restock task", () => {
   const body = buildTaskBody("low_stock", { inventory_item_id: 99, available: 3 }, SHOP);
 
-  expect(body.name).toBe("Restock: 99");
+  expect(body.name).toBe("Restock: 99 (3 left)");
   expect(body.description).toContain("3");
+});
+
+// --- title format: Product - Status - Customer -------------------------------
+
+test("titles an order with its product and status", () => {
+  const body = buildTaskBody(
+    "order_created",
+    { order_number: 1004, financial_status: "paid", line_items: [{ title: "Red T-shirt printed", quantity: 1 }] },
+    SHOP
+  );
+
+  expect(body.name).toBe("Red T-shirt printed - Placed");
+});
+
+test("adds the customer name to the title when Shopify sends one", () => {
+  // Only arrives if the app is granted the customer-name protected field.
+  const body = buildTaskBody(
+    "order_created",
+    {
+      order_number: 1004,
+      line_items: [{ title: "Red T-shirt printed", quantity: 1 }],
+      customer: { first_name: "Amit", last_name: "Vishwakarma" },
+    },
+    SHOP
+  );
+
+  expect(body.name).toBe("Red T-shirt printed - Placed - Amit Vishwakarma");
+});
+
+test("omits the customer segment when Shopify redacts the name", () => {
+  const body = buildTaskBody(
+    "order_created",
+    {
+      order_number: 1004,
+      line_items: [{ title: "Red T-shirt printed", quantity: 1 }],
+      customer: { first_name: null, last_name: null },
+    },
+    SHOP
+  );
+
+  expect(body.name).toBe("Red T-shirt printed - Placed");
+});
+
+test("summarises a multi-product order in the title", () => {
+  const body = buildTaskBody(
+    "order_created",
+    {
+      order_number: 1005,
+      line_items: [
+        { title: "Red T-shirt printed", quantity: 1 },
+        { title: "Cap", quantity: 1 },
+      ],
+    },
+    SHOP
+  );
+
+  expect(body.name).toBe("Red T-shirt printed +1 more - Placed");
+});
+
+test("falls back to the order number when no line items are present", () => {
+  expect(buildTaskBody("order_created", { order_number: 1006 }, SHOP).name).toBe(
+    "Order #1006 - Placed"
+  );
+});
+
+test("titles a restock with the product name when one is known", () => {
+  const body = buildTaskBody(
+    "low_stock",
+    { inventory_item_id: 99, available: 2, product_title: "Red T-shirt printed" },
+    SHOP
+  );
+
+  expect(body.name).toBe("Restock: Red T-shirt printed (2 left)");
 });

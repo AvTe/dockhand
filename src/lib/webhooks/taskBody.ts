@@ -13,6 +13,33 @@ export type TaskBody = { name: string; description: string };
 
 type LineItem = { title?: string; quantity?: number; sku?: string | null };
 
+/**
+ * The customer name, when Shopify sends one.
+ *
+ * Returns null whenever the app has not been granted the customer-name
+ * protected field, which is the default: Shopify delivers the customer object
+ * with its name properties set to null. Titles degrade to product + status
+ * rather than showing an empty segment, and start including the name the
+ * moment the field is granted -- no code change needed.
+ */
+function customerName(payload: Record<string, unknown>): string | null {
+  const customer = payload.customer as
+    | { first_name?: string | null; last_name?: string | null }
+    | undefined;
+  const name = [customer?.first_name, customer?.last_name]
+    .filter((part): part is string => typeof part === "string" && part.trim() !== "")
+    .join(" ");
+  return name || null;
+}
+
+/** What was bought, for the task title. */
+function productSummary(payload: Record<string, unknown>): string | null {
+  const items = Array.isArray(payload.line_items) ? (payload.line_items as LineItem[]) : [];
+  const first = items[0]?.title;
+  if (!first) return null;
+  return items.length > 1 ? `${first} +${items.length - 1} more` : first;
+}
+
 function orderLines(payload: Record<string, unknown>): string[] {
   const items = Array.isArray(payload.line_items) ? (payload.line_items as LineItem[]) : [];
   return items.map((item) => {
@@ -51,7 +78,17 @@ export function buildTaskBody(
       const url = adminOrderUrl(shopDomain, payload);
       if (url) lines.push("", `Customer details and full order: ${url}`);
 
-      return { name: `Pack & ship #${number}`, description: lines.filter((l) => l !== null).join("\n") };
+      // Product - Status - Customer. The customer segment is dropped when
+      // Shopify redacts the name, which it does unless the protected field is
+      // granted.
+      const titleParts = [productSummary(payload) ?? `Order #${number}`, "Placed"];
+      const who = customerName(payload);
+      if (who) titleParts.push(who);
+
+      return {
+        name: titleParts.join(" - "),
+        description: lines.filter((l) => l !== null).join("\n"),
+      };
     }
 
     case "refund": {
@@ -64,13 +101,19 @@ export function buildTaskBody(
     }
 
     case "low_stock": {
-      const label = payload.sku ?? payload.inventory_item_id;
+      // product_title is resolved from the Admin API by the caller when it
+      // can be; a raw inventory_item_id is a meaningless number to a merchant.
+      const label = payload.product_title ?? payload.sku ?? payload.inventory_item_id;
       const available = payload.available;
       const lines = [`Stock is low for ${label}.`];
       if (available !== undefined && available !== null) {
         lines.push(`Remaining: ${available}`);
       }
-      return { name: `Restock: ${label}`, description: lines.join("\n") };
+      const name =
+        available !== undefined && available !== null
+          ? `Restock: ${label} (${available} left)`
+          : `Restock: ${label}`;
+      return { name, description: lines.join("\n") };
     }
 
     default:

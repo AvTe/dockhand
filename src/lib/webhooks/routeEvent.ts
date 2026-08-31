@@ -20,6 +20,9 @@ export type RouteDeps = {
     shopId: string
   ): Promise<{ id: string; access_token: string } | null>;
   findRules(shopId: string, triggerEvent: string): Promise<RuleRow[]>;
+  /** Resolves a product name for an inventory item. Optional: without it a
+   *  restock task is titled with the bare inventory_item_id. */
+  resolveProductTitle?(inventoryItemId: number | string): Promise<string | null>;
   createTask(input: {
     accessToken: string;
     listId: string;
@@ -86,12 +89,22 @@ export async function routeEvent(args: {
   if (!integration) return [];
 
   const rules = await deps.findRules(shopId, triggerEvent);
+  if (rules.length === 0) return [];
+
+  // Only worth an Admin API round trip once a rule is actually going to fire.
+  let enriched = payload;
+  if (triggerEvent === "low_stock" && deps.resolveProductTitle && payload.inventory_item_id) {
+    const title = await deps.resolveProductTitle(
+      payload.inventory_item_id as number | string
+    );
+    if (title) enriched = { ...payload, product_title: title };
+  }
 
   const created: string[] = [];
   for (const rule of rules) {
-    if (!ruleConditionMatches(rule.condition, payload)) continue;
+    if (!ruleConditionMatches(rule.condition, enriched)) continue;
 
-    const { name, description } = buildTaskBody(triggerEvent, payload, shopDomain);
+    const { name, description } = buildTaskBody(triggerEvent, enriched, shopDomain);
 
     const task = await deps.createTask({
       accessToken: integration.access_token,

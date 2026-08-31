@@ -3,6 +3,7 @@ import { verifyShopifyWebhook } from "@/lib/shopify/verifyWebhook";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { createClickUpTask } from "@/lib/clickup/client";
 import { routeEvent, type RouteDeps } from "@/lib/webhooks/routeEvent";
+import { getProductTitleForInventoryItem } from "@/lib/shopify/adminApi";
 
 /**
  * Single endpoint for every topic we subscribe to -- Shopify names the topic in
@@ -35,7 +36,7 @@ export async function POST(req: NextRequest) {
 
   const { data: shop, error: shopError } = await supabase
     .from("shops")
-    .select("id")
+    .select("id, access_token")
     .eq("shop_domain", shopDomain)
     .single();
 
@@ -87,6 +88,13 @@ export async function POST(req: NextRequest) {
         condition: Record<string, unknown> | null;
         assignee: string | null;
       }[];
+    },
+    async resolveProductTitle(inventoryItemId) {
+      return getProductTitleForInventoryItem(
+        shopDomain,
+        shop.access_token as string,
+        inventoryItemId
+      );
     },
     async createTask({ accessToken, listId, name, description, assignees }) {
       const task = await createClickUpTask({ accessToken, listId, name, description, assignees });

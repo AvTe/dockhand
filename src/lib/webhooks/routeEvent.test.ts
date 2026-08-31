@@ -171,3 +171,39 @@ test("creates an unassigned task when the rule names no assignee", async () => {
 
   expect(d.created[0]).toMatchObject({ assignees: [] });
 });
+
+test("titles a restock with the looked-up product name", async () => {
+  // inventory_levels/update carries only inventory_item_id, so the name has to
+  // come from the Admin API or the task reads "Restock: 42260976435329".
+  const d = deps({
+    async findRules() { return [rule({ condition: { below: 5 } })]; },
+    async resolveProductTitle() { return "Red T-shirt printed"; },
+  });
+
+  await routeEvent({
+    shopId: SHOP,
+    shopDomain: "quickstart-6edde43f.myshopify.com",
+    topic: "inventory_levels/update",
+    payload: { inventory_item_id: 42260976435329, available: 2 },
+    deps: d,
+  });
+
+  expect(d.created[0]).toMatchObject({ name: "Restock: Red T-shirt printed (2 left)" });
+});
+
+test("still creates the restock task when the product lookup fails", async () => {
+  const d = deps({
+    async findRules() { return [rule({ condition: { below: 5 } })]; },
+    async resolveProductTitle() { return null; },
+  });
+
+  await routeEvent({
+    shopId: SHOP,
+    shopDomain: "quickstart-6edde43f.myshopify.com",
+    topic: "inventory_levels/update",
+    payload: { inventory_item_id: 42260976435329, available: 2 },
+    deps: d,
+  });
+
+  expect(d.created[0]).toMatchObject({ name: "Restock: 42260976435329 (2 left)" });
+});
