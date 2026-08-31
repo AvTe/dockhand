@@ -13,6 +13,8 @@ export type ShopStore = {
     accessToken: string;
     scope?: string;
   }): Promise<{ id: string }>;
+  /** The shop's id if it is already installed, else null. */
+  findShopIdByDomain(shopDomain: string): Promise<string | null>;
 };
 
 export const supabaseShopStore: ShopStore = {
@@ -30,6 +32,16 @@ export const supabaseShopStore: ShopStore = {
     if (error) throw new Error(`Failed to upsert shop: ${error.message}`);
     return { id: data.id as string };
   },
+
+  async findShopIdByDomain(shopDomain) {
+    const supabase = getSupabaseAdmin();
+    const { data } = await supabase
+      .from("shops")
+      .select("id")
+      .eq("shop_domain", shopDomain)
+      .maybeSingle();
+    return data ? (data.id as string) : null;
+  },
 };
 
 /**
@@ -45,8 +57,21 @@ export async function ensureShop(
   store: ShopStore = supabaseShopStore
 ): Promise<{ shopId: string; shopDomain: string }> {
   const { shopDomain } = await verifySessionToken(sessionToken);
-  const { accessToken, scope } = await exchangeForOfflineToken(shopDomain, sessionToken);
-  const { id } = await store.upsertShop({ shopDomain, accessToken, scope });
 
-  return { shopId: id, shopDomain };
+  try {
+    const { accessToken, scope } = await exchangeForOfflineToken(shopDomain, sessionToken);
+    const { id } = await store.upsertShop({ shopDomain, accessToken, scope });
+    return { shopId: id, shopDomain };
+  } catch (err) {
+    // For an installed shop the exchange is a token refresh, not the install
+    // itself -- the stored offline token is still valid. Failing hard here
+    // would show "Could not complete installation" to a working store because
+    // Shopify hiccuped. Only a shop we have never seen is a real failure.
+    const existingId = await store.findShopIdByDomain(shopDomain);
+    if (existingId) {
+      console.error("Token exchange failed; continuing with stored token", err);
+      return { shopId: existingId, shopDomain };
+    }
+    throw err;
+  }
 }

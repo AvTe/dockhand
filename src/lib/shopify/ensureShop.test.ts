@@ -44,6 +44,9 @@ function fakeStore() {
       upserts.push(input);
       return { id: "shop-uuid-1" };
     },
+    async findShopIdByDomain() {
+      return null;
+    },
   };
   return { store, upserts };
 }
@@ -75,4 +78,41 @@ test("writes nothing when the session token fails verification", async () => {
   await expect(ensureShop(forged, store)).rejects.toThrow();
 
   expect(upserts).toEqual([]);
+});
+
+function fakeStoreWithExisting(existingId: string | null) {
+  const upserts: unknown[] = [];
+  const store: ShopStore = {
+    async upsertShop(input) {
+      upserts.push(input);
+      return { id: "shop-uuid-1" };
+    },
+    async findShopIdByDomain() {
+      return existingId;
+    },
+  };
+  return { store, upserts };
+}
+
+test("falls back to the installed shop when the token exchange fails", async () => {
+  // The exchange is a refresh, not the install. An already-installed shop must
+  // not be locked out of the app because Shopify hiccuped -- otherwise a
+  // transient 500 shows "Could not complete installation" to a working store.
+  vi.stubGlobal("fetch", async () =>
+    new Response(JSON.stringify({ error: "temporarily_unavailable" }), { status: 503 })
+  );
+  const { store } = fakeStoreWithExisting("existing-shop-id");
+
+  const result = await ensureShop(await mintToken(), store);
+
+  expect(result).toEqual({ shopId: "existing-shop-id", shopDomain: SHOP });
+});
+
+test("still fails when the exchange fails and the shop was never installed", async () => {
+  vi.stubGlobal("fetch", async () =>
+    new Response(JSON.stringify({ error: "invalid_subject_token" }), { status: 400 })
+  );
+  const { store } = fakeStoreWithExisting(null);
+
+  await expect(ensureShop(await mintToken(), store)).rejects.toThrow();
 });
