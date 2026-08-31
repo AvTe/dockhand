@@ -124,3 +124,29 @@ export async function getClickUpMembers(accessToken: string, teamId: string) {
     .filter((u): u is { id: number; username?: string; email?: string } => Boolean(u))
     .map((u) => ({ id: String(u.id), name: u.username || u.email || String(u.id) }));
 }
+
+/**
+ * Comments on an existing task.
+ *
+ * Used to report Shopify status changes. ClickUp notifies the task's assignees
+ * and watchers about comments, which is what makes a status change visible
+ * without moving the task between custom per-list statuses.
+ */
+export async function addClickUpComment(
+  accessToken: string,
+  taskId: string,
+  text: string
+): Promise<void> {
+  const res = await fetch(`${CLICKUP_API_BASE}/task/${taskId}/comment`, {
+    method: "POST",
+    headers: {
+      Authorization: accessToken,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ comment_text: text, notify_all: true }),
+  });
+
+  if (!res.ok) {
+    throw new Error(`ClickUp add comment failed: ${res.status} ${await res.text()}`);
+  }
+}

@@ -84,10 +84,14 @@ export async function reconcileNow(sessionToken: string): Promise<ReconcileResul
         return getRecentOrders(shopDomain, accessToken, 25);
       },
       async findProcessedResourceIds(ids) {
+        // Scoped to orders/create: fulfilled and cancelled events also write a
+        // row for the same order, and counting those would make a genuinely
+        // missed order look already handled.
         const { data } = await supabase
           .from("sync_events")
           .select("resource_id")
           .eq("shop_id", shopId)
+          .eq("event_type", "orders/create")
           .in("resource_id", ids);
         return (data ?? []).map((row) => String(row.resource_id));
       },

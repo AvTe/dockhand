@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyShopifyWebhook } from "@/lib/shopify/verifyWebhook";
 import { getSupabaseAdmin } from "@/lib/supabase";
-import { createClickUpTask } from "@/lib/clickup/client";
+import { addClickUpComment, createClickUpTask } from "@/lib/clickup/client";
 import { routeEvent, type RouteDeps } from "@/lib/webhooks/routeEvent";
+import { routeOrderUpdate, describeStatusChange } from "@/lib/webhooks/orderUpdates";
 import { getProductTitleForInventoryItem } from "@/lib/shopify/adminApi";
 
 /**
@@ -114,6 +115,41 @@ export async function POST(req: NextRequest) {
   };
 
   try {
+    // A status change updates the task the order already produced rather than
+    // creating another one.
+    if (describeStatusChange(topic, payload)) {
+      const commented = await routeOrderUpdate({
+        shopId: shop.id,
+        topic,
+        payload,
+        deps: {
+          async findTaskRefsForOrder(_shopId, orderId) {
+            const { data } = await supabase
+              .from("sync_events")
+              .select("created_task_ref")
+              .eq("shop_id", shop.id)
+              .eq("resource_id", orderId)
+              .not("created_task_ref", "is", null);
+            return (data ?? [])
+              .flatMap((row) => String(row.created_task_ref).split(","))
+              .filter(Boolean);
+          },
+          async addComment(taskId, text) {
+            const { data: integration } = await supabase
+              .from("integrations")
+              .select("access_token")
+              .eq("shop_id", shop.id)
+              .eq("provider", "clickup")
+              .maybeSingle();
+            if (!integration) return;
+            await addClickUpComment(integration.access_token as string, taskId, text);
+          },
+        },
+      });
+
+      return NextResponse.json({ ok: true, commented });
+    }
+
     const createdTaskRefs = await routeEvent({
       shopId: shop.id,
       shopDomain,

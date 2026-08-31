@@ -26,6 +26,17 @@ api_version = "2026-10"
   topics = [ "orders/create", "refunds/create" ]
   uri = "/api/webhooks/shopify"
 
+  # Status changes. These comment on the task the order already created rather
+  # than creating another one -- see describeStatusChange() in
+  # src/lib/webhooks/orderUpdates.ts.
+  #
+  # orders/updated is deliberately excluded: it fires on ANY change to an order,
+  # which would comment on tasks constantly. These three are the changes a
+  # merchant actually wants to hear about.
+  [[webhooks.subscriptions]]
+  topics = [ "orders/fulfilled", "orders/cancelled", "orders/paid" ]
+  uri = "/api/webhooks/shopify"
+
   # TODO (build order step 4): the 3 mandatory GDPR compliance webhooks
   # (customers/data_request, customers/redact, shop/redact) go in a
   # [webhooks.privacy_compliance] block. Not added yet because no route
