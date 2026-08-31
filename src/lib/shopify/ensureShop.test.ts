@@ -1,0 +1,78 @@
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { SignJWT } from "jose";
+import { ensureShop, type ShopStore } from "./ensureShop";
+
+const SECRET = "test-shopify-api-secret";
+const CLIENT_ID = "test-client-id";
+const SHOP = "quickstart-6edde43f.myshopify.com";
+
+beforeEach(() => {
+  process.env.SHOPIFY_API_SECRET = SECRET;
+  process.env.NEXT_PUBLIC_SHOPIFY_API_KEY = CLIENT_ID;
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+async function mintToken(): Promise<string> {
+  const now = Math.floor(Date.now() / 1000);
+  return new SignJWT({
+    iss: `https://${SHOP}/admin`,
+    dest: `https://${SHOP}`,
+    aud: CLIENT_ID,
+    exp: now + 60,
+    nbf: now - 10,
+  })
+    .setProtectedHeader({ alg: "HS256" })
+    .sign(new TextEncoder().encode(SECRET));
+}
+
+function stubExchange(accessToken: string) {
+  vi.stubGlobal("fetch", async () =>
+    new Response(JSON.stringify({ access_token: accessToken, scope: "read_orders" }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    })
+  );
+}
+
+function fakeStore() {
+  const upserts: { shopDomain: string; accessToken: string; scope?: string }[] = [];
+  const store: ShopStore = {
+    async upsertShop(input) {
+      upserts.push(input);
+      return { id: "shop-uuid-1" };
+    },
+  };
+  return { store, upserts };
+}
+
+test("stores the exchanged offline token against the shop in the session token", async () => {
+  stubExchange("shpat_offline_token");
+  const { store, upserts } = fakeStore();
+
+  const result = await ensureShop(await mintToken(), store);
+
+  expect(result).toEqual({ shopId: "shop-uuid-1", shopDomain: SHOP });
+  expect(upserts).toEqual([
+    { shopDomain: SHOP, accessToken: "shpat_offline_token", scope: "read_orders" },
+  ]);
+});
+
+test("writes nothing when the session token fails verification", async () => {
+  stubExchange("shpat_should_never_be_stored");
+  const { store, upserts } = fakeStore();
+  const forged = await new SignJWT({
+    iss: `https://${SHOP}/admin`,
+    dest: `https://${SHOP}`,
+    aud: CLIENT_ID,
+    exp: Math.floor(Date.now() / 1000) + 60,
+  })
+    .setProtectedHeader({ alg: "HS256" })
+    .sign(new TextEncoder().encode("wrong-secret"));
+
+  await expect(ensureShop(forged, store)).rejects.toThrow();
+
+  expect(upserts).toEqual([]);
+});
