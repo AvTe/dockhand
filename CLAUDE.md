@@ -108,9 +108,38 @@ before sinking more build time into features nobody's asked for yet.
 - Shop installation is done, via managed install rather than an OAuth redirect. Opening the embedded app verifies the session token, exchanges it for an offline Admin token, and upserts `shops`. There are deliberately no `/api/auth/shopify` routes.
 
 **Still TODO:**
-- The webhook handler's `routeEvent()` only checks for a `clickup` integration — no Monday branch yet.
-- The 3 mandatory Shopify GDPR compliance webhooks (`customers/data_request`, `customers/redact`, `shop/redact`) — required for Shopify App Store approval, not implemented yet.
-- The rules UI — the actual product surface where a merchant sets up "new order → task in Packing." Right now `rules` rows would have to be inserted by hand/SQL.
+- `routeEvent()` only looks up a `clickup` integration — no Monday branch, so the
+  Monday client is written but unreachable.
+- The 3 mandatory Shopify GDPR compliance webhooks (`customers/data_request`,
+  `customers/redact`, `shop/redact`) — required for App Store approval.
+- PII minimisation: `sync_events.payload` still stores the whole webhook body.
+  Task bodies no longer leak it, but the audit log does, with no retention.
+- Duplicate collapsing: Shopify sends two `inventory_levels/update` deliveries
+  per stock edit, with different webhook ids, so dedup correctly lets both
+  through and two tasks appear. Needs collapsing by `inventory_item_id` in a
+  time window.
+- Routing conditions merchants asked for on the ClickUp feedback thread: order
+  value, product/SKU, location. Only `tag` and `below` exist today.
+- `order_tagged` (tag added after purchase) and `orders/cancelled`.
+- Two-way sync (task done in ClickUp → fulfilled in Shopify). Named in the
+  business notes as the pricing differentiator; needs `write_orders`.
+
+## Recovering missed webhooks
+
+Shopify retries a failed delivery for ~48h and then gives up, so an order that
+arrived while the endpoint was down used to be lost with no trace. The app has a
+**Check for missed orders** button (`reconcileNow` in `src/app/actions/reconcile.ts`)
+that lists recent orders from the Admin API, skips the ones `sync_events` already
+records, and processes the rest.
+
+That comparison is what `sync_events.resource_id` exists for. The unique key on
+`(shop_id, shopify_webhook_id)` only stops a *retry* of one delivery from
+duplicating; it cannot say whether an order was ever handled, because a
+redelivery has a different webhook id and a recovered order has none at all.
+
+Recovered orders are inserted as `reconcile:order:<id>` **before** the task is
+created, which makes that unique constraint the lock — two concurrent runs
+cannot both create a task for one order.
 
 ## Platform-specific facts worth remembering
 
@@ -122,11 +151,15 @@ before sinking more build time into features nobody's asked for yet.
 
 1. ~~Fix the OAuth `state` param issue.~~ Done.
 2. ~~Build Shopify app installation flow → populates `shops`.~~ Done (managed install).
-3. Build the rules UI → writes to `rules`. Needs App Bridge: the connect-to-ClickUp link must open top-level, since ClickUp's authorize page refuses to be framed.
-4. Implement the 3 Shopify compliance webhooks.
-5. Add the Monday branch to `routeEvent()`.
-6. Connect the repo to Vercel, get a real deployed URL, set `APP_BASE_URL` to it, and update the redirect URIs registered with ClickUp and Monday to match.
-7. Submit for Shopify App Store review — budget for at least one rejection-and-fix round, that's normal.
+3. ~~Build the rules UI.~~ Done — Polaris web components, Server Actions, with
+   trigger, tag/threshold condition, ClickUp list picker and assignee.
+4. ~~Deploy to Vercel and point Shopify at it.~~ Done — `https://dockhand-4cks.vercel.app`.
+5. Implement the 3 Shopify compliance webhooks.
+6. Collapse duplicate `inventory_levels/update` deliveries.
+7. Add the Monday branch to `routeEvent()`.
+8. Strip PII from `sync_events.payload` and add retention.
+9. Submit for Shopify App Store review — budget for at least one rejection-and-fix round, that's normal.
+
 ---
 
 # Operating this repo
@@ -344,3 +377,21 @@ The `NEXT_PUBLIC_*` Supabase values there are real and frontend-safe by design.
 
 `strict` plus `noUncheckedIndexedAccess`, so indexed access yields
 `T | undefined` and needs narrowing. Path alias `@/*` → `src/*`.
+
+## Local dev is the fragile path
+
+Nearly every failure during the build came from `shopify app dev`, none from
+Vercel. Worth knowing before reaching for it:
+
+- It rewrites the app URL on **Shopify's side** to an ephemeral tunnel while
+  leaving `shopify.app.toml` untouched. So webhooks silently start going to your
+  laptop, and keep pointing at a dead hostname once you stop it. Run
+  `shopify app deploy` afterwards to put Shopify back on Vercel.
+- Two `shopify app dev` sessions fight over that URL, and whichever exits first
+  cleans the dev preview — which surfaces in the admin as "Find this app in the
+  pages where you work", not as an error.
+- Deleting `.next` while it runs corrupts it in a way that survives a restart
+  (`Cannot find module './chunks/vendor-chunks/next.js'`). Stop the server,
+  delete `.next`, then start it.
+
+If you are not actively editing UI, don't run it. Deploy and let Vercel serve.
