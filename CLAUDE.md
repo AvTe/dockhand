@@ -103,10 +103,12 @@ before sinking more build time into features nobody's asked for yet.
 - `src/app/api/webhooks/shopify/route.ts` — real dedup logic against `sync_events` (relies on the DB unique constraint, not application-level locking, so it's race-safe), real routing from Shopify topic → trigger event → matching rules → ClickUp task creation.
 - Supabase schema — live, not just sketched.
 
-**Deliberately left as TODOs (marked in code with `// TODO`):**
-- OAuth `state` param verification in both `/api/auth/clickup/callback` and `/api/auth/monday/callback` — right now the callback trusts a `shop_id` query param with no signature tying it back to a real session. **Do not ship OAuth to production without fixing this** — it's a real account-takeover vector as written.
+**Since built (do not re-plan these):**
+- OAuth `state` is done. Both callbacks derive the shop from a single-use nonce in `oauth_states`; the `shop_id` query param is gone. See "OAuth state and the auth boundary" below.
+- Shop installation is done, via managed install rather than an OAuth redirect. Opening the embedded app verifies the session token, exchanges it for an offline Admin token, and upserts `shops`. There are deliberately no `/api/auth/shopify` routes.
+
+**Still TODO:**
 - The webhook handler's `routeEvent()` only checks for a `clickup` integration — no Monday branch yet.
-- Shop installation itself (the Shopify OAuth flow that populates the `shops` table) isn't built — the whole app currently assumes a `shops` row already exists.
 - The 3 mandatory Shopify GDPR compliance webhooks (`customers/data_request`, `customers/redact`, `shop/redact`) — required for Shopify App Store approval, not implemented yet.
 - The rules UI — the actual product surface where a merchant sets up "new order → task in Packing." Right now `rules` rows would have to be inserted by hand/SQL.
 
@@ -118,9 +120,9 @@ before sinking more build time into features nobody's asked for yet.
 
 ## Build order (pick up here)
 
-1. Fix the OAuth `state` param issue (security, not optional).
-2. Build Shopify app installation flow → populates `shops`.
-3. Build the rules UI → writes to `rules`.
+1. ~~Fix the OAuth `state` param issue.~~ Done.
+2. ~~Build Shopify app installation flow → populates `shops`.~~ Done (managed install).
+3. Build the rules UI → writes to `rules`. Needs App Bridge: the connect-to-ClickUp link must open top-level, since ClickUp's authorize page refuses to be framed.
 4. Implement the 3 Shopify compliance webhooks.
 5. Add the Monday branch to `routeEvent()`.
 6. Connect the repo to Vercel, get a real deployed URL, set `APP_BASE_URL` to it, and update the redirect URIs registered with ClickUp and Monday to match.
@@ -186,11 +188,25 @@ client-side. The client_id is public, so it's prefilled in `.env.example`;
 `SHOPIFY_API_SECRET` is the only genuine Shopify secret and the only Shopify
 variable any code reads today.
 
-Webhook subscriptions for the five business topics are declared in
-`[[webhooks.subscriptions]]` pointing at `/api/webhooks/shopify`. The three
-mandatory GDPR compliance webhooks are deliberately **not** declared yet — no
-route handles them, so declaring them would point Shopify at 404s. Build order
-step 4.
+**Protected Customer Data gates the order and refund topics.** Shopify refuses
+webhook subscriptions to topics carrying customer PII until the app is granted
+Protected Customer Data access (Partner Dashboard → Apps → Dockhand → API access
+→ Protected customer data access). Without it, `shopify app dev` doesn't merely
+warn — it fails with "Failed to start dev preview" after logging *"This app is
+not approved to subscribe to webhook topics containing protected customer
+data."* once per offending topic.
+
+So `[[webhooks.subscriptions]]` currently declares only `inventory_levels/update`,
+the one needed topic with no customer data in it. `orders/create` and
+`refunds/create` sit commented out in `shopify.app.toml` with a restore note;
+uncomment them once access is granted. Note that `orders/updated` and
+`orders/cancelled` are deliberately absent even from that commented block —
+`mapTopicToTrigger()` returns null for both, so subscribing would deliver events
+that no-op. Add a topic here only alongside the code that handles it.
+
+The three mandatory GDPR compliance webhooks are separately still undeclared —
+no route handles them, so declaring them would point Shopify at 404s. Build
+order step 4.
 
 ## Database migrations — how a change actually reaches the live DB
 
@@ -244,6 +260,49 @@ jsonb check inside `order_created`. A genuine `order_tagged` trigger needs the
 `orders/updated` topic plus stored prior tag state to diff against, because
 Shopify's payload doesn't say what changed.
 
+## OAuth state and the auth boundary
+
+Two separate auth mechanisms, easy to confuse:
+
+**Shopify → us.** `verifySessionToken` in `src/lib/shopify/sessionToken.ts` is the
+app's entire auth boundary for embedded requests. Everything downstream trusts
+the shop domain it returns. It pins HS256, checks `aud` against the client id,
+and requires `iss` and `dest` to name the same shop — the app secret is shared
+across every shop that installs, so a valid signature alone does not say which
+shop a token is for. It allows 5s of clock skew: Shopify stamps `nbf` with its
+own clock, and a machine even ~2s behind (measured, on this one) rejects every
+legitimate token with `JWTClaimValidationFailed: "nbf"`.
+
+**Us → ClickUp/Monday.** The authorize routes require an `id_token`, resolve the
+shop through `resolveShopId`, and mint a single-use nonce into `oauth_states`
+which travels as the OAuth `state`. The callbacks derive the shop *only* from
+that nonce. They never read `shop_id` from the query string — doing so let
+anyone bind their own ClickUp workspace to another merchant's shop and pipe that
+shop's orders into an attacker's board.
+
+Consumption is one conditional `UPDATE ... RETURNING`, deliberately not
+`SELECT`-then-`UPDATE`: filters and write land in a single statement, so two
+concurrent callbacks replaying one nonce cannot both see it unconsumed. Verified
+against the live database — first consume returns the shop, the replay returns
+zero rows. `createInMemoryOAuthStateStore` is the reference implementation of
+that contract and is what the tests run against; the SQL itself is covered only
+by that manual round-trip.
+
+## Running the app locally
+
+`shopify app dev` must be running for the app to load in the Shopify admin at
+all. It serves through an ephemeral Cloudflare tunnel, and the admin points at
+that tunnel URL, so stopping the dev server makes the app show "server IP
+address could not be found". That is the dev server being down, not breakage.
+
+The tunnel hostname changes between sessions. The committed `shopify.app.toml`
+keeps the placeholder `shopify.dev/apps/default-app-home` URLs — the CLI updates
+the app record on Shopify's side, not the local file — so no machine-specific
+tunnel URL should ever be committed. If you see one in a diff, don't.
+
+Don't `rm -rf .next` while the dev server is running: it keeps serving from the
+deleted directory and fails with `Cannot find module './276.js'`. Stop it first.
+
 ## Supabase clients
 
 `getSupabaseAdmin()` in `src/lib/supabase.ts` uses the **service role key and
@@ -251,9 +310,22 @@ bypasses row-level security**. Server-only: importing it into a `"use client"`
 component would ship a full-access key to the browser.
 
 There is deliberately **no browser/anon Supabase client yet**, because nothing
-user-facing reads from the database. Building the rules UI (build order step 3)
-means adding one *and* writing RLS policies — the tables currently have none,
-which is only safe while the service-role client is the sole reader.
+user-facing reads from the database.
+
+**RLS is enabled on every table with no policies** (`20260831071345_enable_rls.sql`).
+That is the intended state, not an oversight: no policy means anon and
+authenticated are denied everything, while the service role bypasses RLS. The
+Supabase advisor reports this as INFO ("RLS enabled, no policy") — that INFO is
+expected; the ERROR it replaced was not.
+
+Why it mattered: PostgREST exposes the public schema, and before this the anon
+key could read `shops.access_token` (a merchant's Shopify Admin API token) and
+write to every table. The anon key is `NEXT_PUBLIC_` by design, so it reaches
+the browser as soon as any client-side Supabase code exists. Verified after the
+fix: anon reads return 0 rows, anon writes return `42501`.
+
+If the rules UI ever needs browser reads, add narrowly-scoped policies — never
+turn RLS back off. Re-check with the Supabase advisors after any DDL change.
 
 ## Environment
 

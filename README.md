@@ -44,7 +44,7 @@ this repo via `shopify app config link`, so `shopify.app.toml` is committed here
 
 What that file already declares, so you don't set it anywhere else:
 - Scopes: `read_orders`, `read_inventory`, `read_products`.
-- Webhook subscriptions: `orders/create`, `orders/updated`, `orders/cancelled`, `refunds/create`, `inventory_levels/update`, all delivered to `/api/webhooks/shopify`.
+- Webhook subscriptions: `inventory_levels/update`, delivered to `/api/webhooks/shopify`. `orders/create` and `refunds/create` are commented out in `shopify.app.toml` until the app is granted Protected Customer Data access — subscribing to them without it makes `shopify app dev` fail to start.
 
 What you still need to do:
 - Copy `SHOPIFY_API_SECRET` from the app's page in the Partner dashboard into `.env.local`. It's the only Shopify secret, and the only Shopify variable any code reads. (The client ID is public and already prefilled as `NEXT_PUBLIC_SHOPIFY_API_KEY`.)
